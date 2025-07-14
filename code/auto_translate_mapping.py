@@ -1,11 +1,11 @@
 import os
 import json
 import time
-import requests
 import argparse
 import sys
 from dotenv import load_dotenv
 import importlib.util
+from openai import OpenAI
 
 # 加载.env配置
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
@@ -17,10 +17,12 @@ SOURCE_LANG = os.getenv("SFX_SOURCE_LANG", "en")
 DEFAULT_TARGET_LANG = os.getenv("SFX_TARGET_LANG")
 MODEL = os.getenv("SFX_MODEL")
 TEMPERATURE = float(os.getenv("SFX_TEMPERATURE", "1.3"))
-HEADERS = {
-    "Content-Type": "application/json",
-    "Authorization": f"Bearer {API_KEY}"
-}
+
+# 创建OpenAI客户端
+client = OpenAI(
+    api_key=API_KEY,
+    base_url=API_URL,
+)
 
 # 文件路径
 MAPPING_PATH = os.path.join(os.path.dirname(__file__), "..", "json", "mapping.json")
@@ -42,22 +44,19 @@ def batch_translate_block(block, source=SOURCE_LANG, target=DEFAULT_TARGET_LANG,
         json.dumps(items, ensure_ascii=False)
     )
     
-    payload = {
-        "model": MODEL,
-        "temperature": TEMPERATURE,
-        "messages": [
-            {"role": "system", "content": "你是专业的音效术语翻译助手，请将英文音效术语翻译为中文。"},
-            {"role": "user", "content": user_content}
-        ],
-        "response_format": {"type": "json_object"}
-    }
-    
     for attempt in range(max_retries):
         try:
-            response = requests.post(API_URL, headers=HEADERS, json=payload, timeout=60)
-            response.raise_for_status()
-            data = response.json()
-            result_json = json.loads(data["choices"][0]["message"]["content"])
+            completion = client.chat.completions.create(
+                model=MODEL,
+                temperature=TEMPERATURE,
+                messages=[
+                    {"role": "system", "content": "你是专业的音效术语翻译助手，请将英文音效术语翻译为中文。"},
+                    {"role": "user", "content": user_content}
+                ],
+                response_format={"type": "json_object"}
+            )
+            
+            result_json = json.loads(completion.choices[0].message.content)
             return result_json
         except Exception as e:
             print(f"[警告] 批量翻译失败: {e}")

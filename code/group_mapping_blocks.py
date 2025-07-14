@@ -20,11 +20,12 @@ def group_by_continuous_prefix(mapping, min_group_size=2):
     groups = {}
     for k, original in items:
         # 首先尝试匹配第一个数字出现前的所有内容作为分组前缀
+        # 但要确保匹配的内容不为空（避免以数字开头的情况）
         m = re.match(r'^(.*?)(?=\d)', original)
-        if m and m.group(0):
+        if m and m.group(0) and len(m.group(0)) > 0:
             prefix = m.group(0)
         else:
-            # 如果没有数字，按照下划线分割后的前两个部分作为前缀
+            # 如果没有数字或者匹配为空，按照下划线分割后的前两个部分作为前缀
             parts = original.split('_')
             if len(parts) >= 2:
                 prefix = parts[0] + '_'
