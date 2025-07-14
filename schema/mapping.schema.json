@@ -1,0 +1,27 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "SFX Mapping Schema",
+    "type": "object",
+    "description": "id到翻译信息的映射表。key为文件id，value为{original, ext, translation}对象。",
+    "patternProperties": {
+        ".+": {
+            "type": "object",
+            "properties": {
+                "original": {
+                    "type": "string",
+                    "description": "原始文件名（无扩展名）"
+                },
+                "translation": {
+                    "type": "string",
+                    "description": "翻译后的中文名（无扩展名）"
+                }
+            },
+            "required": [
+                "original",
+                "translation"
+            ],
+            "additionalProperties": false
+        }
+    },
+    "additionalProperties": false
+}

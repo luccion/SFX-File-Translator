@@ -1,0 +1,32 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "SFX Structure Schema",
+    "type": "object",
+    "description": "嵌套的音效文件夹和文件结构树。key为文件夹名或文件名，value为子结构对象或{id, ext}（文件）。",
+    "additionalProperties": {
+        "oneOf": [
+            {
+                "type": "object",
+                "$ref": "#"
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "唯一文件ID"
+                    },
+                    "ext": {
+                        "type": "string",
+                        "description": "文件扩展名（含点）"
+                    }
+                },
+                "required": [
+                    "id",
+                    "ext"
+                ],
+                "additionalProperties": false
+            }
+        ]
+    }
+}

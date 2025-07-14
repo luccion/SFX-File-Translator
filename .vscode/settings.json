@@ -1,0 +1,12 @@
+{
+  "json.schemas": [
+    {
+      "fileMatch": ["/structure.json"],
+      "url": "./schema/structure.schema.json"
+    },
+    {
+      "fileMatch": ["/mapping.json"],
+      "url": "./schema/mapping.schema.json"
+    }
+  ]
+}
