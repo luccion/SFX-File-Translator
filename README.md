@@ -1,15 +1,28 @@
 # SFXRenamer
 
-一个用于批量重命名音效文件的Python工具集，支持AI自动翻译和智能分组处理。
+一个用于批量重命名音效文件的Python工具集，支持AI自动翻译。
+
+效果取决于选择的模型，笔者使用Qwen/Qwen3-30B-A3B测试，准确率约为90%，可能会有一些遗漏（5%左右）。
+遗漏部分只需再执行一遍就可以了。
+
+效果大概像这样：
+
+```json
+ "889b92f1-223c-4d5c-ba22-9eefbc0d5372": {              //UUID
+    "original": "WEAPArmr_Hybrid Shield Drops_JSE_MW",  //原名
+    "translation": "武器_盔甲_混合_盾牌_掉落_JSE_MW"    //AI翻译
+  },
+```
+
 
 ## 功能特性
 
-- 🎵 **音频文件扫描**: 自动扫描目录结构并生成文件树
-- 🤖 **AI自动翻译**: 使用AI模型自动翻译音效文件名称
-- 📊 **智能分组**: 按照命名规则智能分组，确保翻译风格一致
-- 🔄 **批量重命名**: 基于翻译映射批量重命名文件
-- 📁 **占位文件**: 创建占位文件用于测试和预览
-- ✅ **JSON Schema验证**: 提供完整的数据结构验证
+- **音频文件扫描**: 自动扫描目录结构并生成文件树
+- **AI自动翻译**: 使用AI模型自动翻译音效文件名称
+- **智能分组**: 按照命名规则智能分组，确保翻译风格一致
+- **批量重命名**: 基于翻译映射批量重命名文件
+- **占位文件**: 创建占位文件用于测试和预览
+- **JSON Schema验证**: 提供完整的数据结构验证
 
 ## 项目结构
 
@@ -17,8 +30,8 @@
 SFXRenamer/
 ├── code/                          # 核心脚本
 │   ├── generate_sfx_json.py       # 扫描音频文件并生成结构树
-│   ├── auto_translate_mapping.py  # AI自动翻译音效名称
-│   ├── group_mapping_blocks.py    # 智能分组处理
+│   ├── auto_translate_mapping.py  # AI翻译
+│   ├── group_mapping_blocks.py    # 自动分组处理
 │   ├── rename_by_map.py           # 批量重命名文件
 │   └── create_placeholders.py     # 创建占位文件
 ├── json/                          # 数据文件
@@ -105,7 +118,9 @@ python create_placeholders.py
 - 自动重试机制确保翻译成功率
 - 中文翻译采用下划线分隔词汇
 
-### 智能分组 (`group_mapping_blocks.py`)
+### 自动分组 (`group_mapping_blocks.py`)
+自动翻译的辅助功能，保证上下文统一和降低请求次数。
+将条目自动分割、分组处理，可以有效增强返回词条的连贯性。
 
 分组规则：
 1. 优先按第一个数字前的所有字符分组
@@ -121,56 +136,7 @@ python create_placeholders.py
 
 ## 数据格式
 
-### 结构文件 (`structure.json`)
-
-嵌套的文件夹和文件结构：
-
-```json
-{
-  "Weapons": {
-    "Swords": {
-      "sword_hit_01.wav": {
-        "id": "uuid-string",
-        "ext": ".wav"
-      }
-    }
-  }
-}
-```
-
-### 映射文件 (`mapping.json`)
-
-ID到翻译信息的映射：
-
-```json
-{
-  "uuid-string": {
-    "original": "sword_hit_01",
-    "translation": "剑_击打_01"
-  }
-}
-```
-
-## 故障排除
-
-### 常见问题
-
-1. **API密钥错误**
-   ```
-   请设置 API_KEY 环境变量或在代码中填写 API_KEY
-   ```
-   解决：检查 `.env` 文件中的 `SFX_API_KEY` 设置
-
-2. **文件路径不存在**
-   ```
-   请在 .env 文件中设置 SFX_DIR 环境变量！
-   ```
-   解决：确保 `.env` 文件中的路径存在且可访问
-
-3. **翻译失败**
-   - 检查网络连接
-   - 验证API密钥有效性
-   - 确认API服务可用性
+使用过程无需关心数据格式，如有必要可以在schema中自行查询。
 
 ## 贡献指南
 
