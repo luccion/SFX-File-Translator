@@ -23,6 +23,55 @@ fallback_client = None
 # 文件路径
 MAPPING_PATH = os.path.join(os.path.dirname(__file__), "..", "json", "mapping.json")
 
+def select_provider():
+    """让用户选择服务商"""
+    available_providers = APIClientFactory.get_available_providers()
+    
+    print("\n=== 可用的API服务商 ===")
+    for i, provider in enumerate(available_providers, 1):
+        print(f"{i}. {provider}")
+    
+    print(f"\n默认服务商: {DEFAULT_PROVIDER}")
+    choice = input("请选择服务商 (直接回车使用默认): ").strip()
+    
+    if not choice:
+        return DEFAULT_PROVIDER
+    
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(available_providers):
+            return available_providers[idx]
+        else:
+            print("无效选择，使用默认服务商")
+            return DEFAULT_PROVIDER
+    except ValueError:
+        print("无效输入，使用默认服务商")
+        return DEFAULT_PROVIDER
+
+def initialize_clients(primary_provider, fallback_provider=None):
+    """初始化API客户端"""
+    global primary_client, fallback_client
+    
+    print(f"正在初始化主要服务商: {primary_provider}")
+    try:
+        primary_client = get_client_by_provider(primary_provider)
+        print(f"✓ 主要服务商 {primary_provider} 初始化成功")
+    except Exception as e:
+        print(f"✗ 主要服务商 {primary_provider} 初始化失败: {e}")
+        return False
+    
+    # 初始化备用服务商
+    if fallback_provider and fallback_provider != primary_provider:
+        print(f"正在初始化备用服务商: {fallback_provider}")
+        try:
+            fallback_client = get_client_by_provider(fallback_provider)
+            print(f"✓ 备用服务商 {fallback_provider} 初始化成功")
+        except Exception as e:
+            print(f"✗ 备用服务商 {fallback_provider} 初始化失败: {e}")
+            fallback_client = None
+    
+    return True
+
 def estimate_tokens(text, model="gpt-3.5-turbo"):
     """
     估算文本的token数量
@@ -40,7 +89,7 @@ def estimate_tokens(text, model="gpt-3.5-turbo"):
         encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(text))
 
-def calculate_batch_tokens(block, model=MODEL):
+def calculate_batch_tokens(block, model="gpt-3.5-turbo"):
     """
     计算一个批次的token消耗预算
     """
@@ -59,7 +108,8 @@ def calculate_batch_tokens(block, model=MODEL):
     
     # 计算输入token
     input_tokens = estimate_tokens(system_content, model) + estimate_tokens(user_content, model)
-      # 估算输出token（假设每个条目平均生成20个token）
+    
+    # 估算输出token（假设每个条目平均生成20个token）
     estimated_output_tokens = len(block) * 20
     
     return {
@@ -67,30 +117,6 @@ def calculate_batch_tokens(block, model=MODEL):
         "estimated_output_tokens": estimated_output_tokens,
         "total_estimated_tokens": input_tokens + estimated_output_tokens
     }
-
-def call_fallback_api(messages, temperature=TEMPERATURE):
-    """
-    调用硅基流动API作为备用服务
-    """
-    headers = {
-        "Authorization": f"Bearer {FALLBACK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    data = {
-        "model": FALLBACK_MODEL,
-        "messages": messages,
-        "temperature": temperature
-    }
-    
-    response = requests.post(FALLBACK_API_URL, headers=headers, json=data)
-    response.raise_for_status()
-    result = response.json()
-    
-    if "choices" in result and len(result["choices"]) > 0:
-        return result["choices"][0]["message"]["content"]
-    else:
-        raise Exception(f"硅基流动API返回格式异常: {result}")
 
 def batch_translate_block(block, source=SOURCE_LANG, target=DEFAULT_TARGET_LANG, max_retries=3):
     """
@@ -115,35 +141,22 @@ def batch_translate_block(block, source=SOURCE_LANG, target=DEFAULT_TARGET_LANG,
     ]
     
     # 首先尝试主API
-    for attempt in range(max_retries):
+    if primary_client:
         try:
-            print(f"  尝试主API (attempt {attempt + 1}/{max_retries})")
-            completion = client.chat.completions.create(
-                model=MODEL,
-                temperature=TEMPERATURE,
-                messages=messages,
-                response_format={"type": "json_object"}
-            )
-            
-            result_json = json.loads(completion.choices[0].message.content)
-            return result_json
+            print(f"  尝试主API ({primary_client.get_name()})")
+            result = primary_client.call_api(messages, max_retries)
+            return result
         except Exception as e:
             print(f"  [警告] 主API失败: {e}")
-            if "404" in str(e) or attempt == max_retries - 1:
-                break
-            time.sleep(2 + attempt * 2)
     
     # 主API失败，尝试备用API
-    print(f"  主API失败，尝试备用API (硅基流动)")
-    for attempt in range(max_retries):
+    if fallback_client:
         try:
-            print(f"  尝试备用API (attempt {attempt + 1}/{max_retries})")
-            response_content = call_fallback_api(messages, TEMPERATURE)
-            result_json = json.loads(response_content)
-            return result_json
+            print(f"  尝试备用API ({fallback_client.get_name()})")
+            result = fallback_client.call_api(messages, max_retries)
+            return result
         except Exception as e:
             print(f"  [警告] 备用API失败: {e}")
-            time.sleep(2 + attempt * 2)
     
     print("[错误] 所有API都失败，跳过该块。内容：", block)
     return {}
@@ -163,14 +176,31 @@ def main():
     parser.add_argument("--target", type=str, default=DEFAULT_TARGET_LANG, help="目标语言代码, 默认zh-CN")
     parser.add_argument("--min-group-size", type=int, default=2, help="分组最小条数，默认2")
     parser.add_argument("--dry-run", action="store_true", help="仅计算token预算，不执行翻译")
+    parser.add_argument("--provider", type=str, help="指定服务商，不指定则交互式选择")
     args = parser.parse_args()
+    
     target_lang = args.target
     min_group_size = args.min_group_size
     
-    if not API_KEY or API_KEY == "your-api-key-here":
-        print("请设置 API_KEY 环境变量或在代码中填写 API_KEY")
+    # 选择服务商
+    if args.provider:
+        primary_provider = args.provider
+    else:
+        primary_provider = select_provider()
+    
+    # 设置备用服务商（与主服务商不同）
+    available_providers = APIClientFactory.get_available_providers()
+    fallback_provider = None
+    for provider in available_providers:
+        if provider != primary_provider:
+            fallback_provider = provider
+            break
+    
+    # 初始化API客户端
+    if not initialize_clients(primary_provider, fallback_provider):
+        print("API客户端初始化失败")
         sys.exit(1)
-        
+    
     with open(MAPPING_PATH, "r", encoding="utf-8") as f:
         mapping = json.load(f)
     
@@ -185,9 +215,10 @@ def main():
     total_estimated_tokens = 0
     
     print("\n=== Token 预算计算 ===")
+    model = primary_client.model if primary_client else "gpt-3.5-turbo"
     for i, block in enumerate(groups, 1):
         prefix = block[0][1].split('_')[0] if block else ''
-        token_info = calculate_batch_tokens(block)
+        token_info = calculate_batch_tokens(block, model)
         total_input_tokens += token_info["input_tokens"]
         total_estimated_output_tokens += token_info["estimated_output_tokens"]
         total_estimated_tokens += token_info["total_estimated_tokens"]
