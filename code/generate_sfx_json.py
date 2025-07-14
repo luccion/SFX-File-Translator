@@ -1,10 +1,19 @@
 import os
 import json
-import uuid
 from dotenv import load_dotenv
 
 # 支持的音频文件后缀
 AUDIO_EXTS = ['.wav', '.mp3', '.flac', '.ogg', '.aac', '.m4a', '.wma']
+
+# 全局计数器，用于生成递增的数字ID
+_id_counter = 1
+
+def get_next_id():
+    """获取下一个递增的数字ID"""
+    global _id_counter
+    current_id = _id_counter
+    _id_counter += 1
+    return str(current_id)
 
 def is_audio_file(filename):
     return any(filename.lower().endswith(ext) for ext in AUDIO_EXTS)
@@ -18,8 +27,8 @@ def scan_folder(folder):
             if subtree:
                 tree[entry] = subtree
         elif is_audio_file(entry):
-            # 为每个文件生成唯一id，并提取扩展名
-            file_id = str(uuid.uuid4())
+            # 为每个文件生成递增的数字id，并提取扩展名
+            file_id = get_next_id()
             name, ext = os.path.splitext(entry)
             tree[entry] = {"id": file_id, "ext": ext}
     return tree
