@@ -3,6 +3,10 @@
 .env.local
 .env.*.local
 
+# 服务商配置文件
+config/providers.json
+
+# 系统文件
 .DS_Store
 ._*
 
@@ -14,3 +18,12 @@ json/group.json
 # Python
 code/__pycache__/
 __pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 临时文件
+placeholder/
+*.tmp
+*.temp
+*.log

@@ -8,11 +8,13 @@ from dotenv import load_dotenv
 class APIClient:
     """统一的API客户端基类"""
     
-    def __init__(self, api_url, api_key, model, temperature=1.3):
-        self.api_url = api_url
-        self.api_key = api_key
-        self.model = model
-        self.temperature = temperature
+    def __init__(self, config):
+        self.config = config
+        self.api_url = config.get('api_url')
+        self.api_key = config.get('api_key')
+        self.model = config.get('model')
+        self.name = config.get('name', 'Unknown')
+        self.client_type = config.get('client_type', 'openai')
     
     def call_api(self, messages, max_retries=3):
         """调用API的抽象方法，子类需要实现"""
@@ -20,28 +22,24 @@ class APIClient:
     
     def get_name(self):
         """获取服务商名称"""
-        return self.__class__.__name__
+        return self.name
 
 class OpenAIClient(APIClient):
     """OpenAI兼容的API客户端（支持通义千问、硅基流动等）"""
     
-    def __init__(self, api_url, api_key, model, temperature=1.3):
-        super().__init__(api_url, api_key, model, temperature)
+    def __init__(self, config):
+        super().__init__(config)
         self.client = OpenAI(
-            api_key=api_key,
-            base_url=api_url,
+            api_key=self.api_key,
+            base_url=self.api_url,
         )
-    
-    def get_name(self):
-        """获取服务商名称"""
-        return "OpenAI兼容服务"
     
     def call_api(self, messages, max_retries=3):
         for attempt in range(max_retries):
             try:
                 completion = self.client.chat.completions.create(
                     model=self.model,
-                    temperature=self.temperature,
+                    temperature=self.config.get('temperature', 1.3),
                     messages=messages,
                     response_format={"type": "json_object"}
                 )
@@ -56,14 +54,10 @@ class OpenAIClient(APIClient):
         raise Exception("所有重试都失败")
 
 class SiliconFlowClient(APIClient):
-    """硅基流动API客户端"""
+    """硅基流动API客户端（使用HTTP请求）"""
     
-    def __init__(self, api_url, api_key, model, temperature=1.3):
-        super().__init__(api_url, api_key, model, temperature)
-    
-    def get_name(self):
-        """获取服务商名称"""
-        return "硅基流动"
+    def __init__(self, config):
+        super().__init__(config)
     
     def call_api(self, messages, max_retries=3):
         headers = {
@@ -74,7 +68,7 @@ class SiliconFlowClient(APIClient):
         data = {
             "model": self.model,
             "messages": messages,
-            "temperature": self.temperature
+            "temperature": self.config.get('temperature', 1.3)
         }
         
         for attempt in range(max_retries):
@@ -85,7 +79,17 @@ class SiliconFlowClient(APIClient):
                 
                 if "choices" in result and len(result["choices"]) > 0:
                     content = result["choices"][0]["message"]["content"]
-                    return json.loads(content)
+                    # 尝试解析JSON，如果失败则返回原始内容
+                    try:
+                        return json.loads(content)
+                    except json.JSONDecodeError:
+                        # 如果不是JSON格式，尝试从文本中提取JSON
+                        import re
+                        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+                        if json_match:
+                            return json.loads(json_match.group())
+                        else:
+                            raise Exception(f"无法解析响应内容为JSON: {content}")
                 else:
                     raise Exception(f"API返回格式异常: {result}")
             except Exception as e:
@@ -95,52 +99,102 @@ class SiliconFlowClient(APIClient):
         
         raise Exception("所有重试都失败")
 
+class ProvidersConfig:
+    """服务商配置管理类"""
+    
+    def __init__(self, config_file=None):
+        if config_file is None:
+            config_file = os.path.join(os.path.dirname(__file__), '..', 'config', 'providers.json')
+        
+        self.config_file = config_file
+        self.config = self._load_config()
+    
+    def _load_config(self):
+        """加载配置文件"""
+        try:
+            with open(self.config_file, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            raise FileNotFoundError(f"配置文件不存在: {self.config_file}")
+        except json.JSONDecodeError as e:
+            raise ValueError(f"配置文件格式错误: {e}")
+    
+    def get_providers(self):
+        """获取所有服务商配置"""
+        return self.config.get('providers', {})
+    
+    def get_provider_config(self, provider_id, model_id=None):
+        """获取指定服务商配置"""
+        providers = self.get_providers()
+        if provider_id not in providers:
+            raise ValueError(f"未找到服务商: {provider_id}")
+        
+        provider_config = providers[provider_id].copy()
+        common_settings = self.config.get('common_settings', {})
+        
+        # 合并通用设置
+        for key, value in common_settings.items():
+            if key not in provider_config:
+                provider_config[key] = value
+        
+        # 设置模型
+        if model_id:
+            provider_config['model'] = model_id
+        else:
+            provider_config['model'] = provider_config.get('default_model', 
+                                                          provider_config.get('models', [{}])[0].get('id', ''))
+        
+        return provider_config
+    
+    def get_provider_models(self, provider_id):
+        """获取指定服务商的模型列表"""
+        providers = self.get_providers()
+        if provider_id not in providers:
+            raise ValueError(f"未找到服务商: {provider_id}")
+        
+        return providers[provider_id].get('models', [])
+    
+    def get_default_provider(self):
+        """获取默认服务商ID"""
+        return self.config.get('default_provider', list(self.get_providers().keys())[0])
+    
+    def get_default_model(self, provider_id):
+        """获取服务商的默认模型"""
+        providers = self.get_providers()
+        if provider_id not in providers:
+            raise ValueError(f"未找到服务商: {provider_id}")
+        
+        provider = providers[provider_id]
+        return provider.get('default_model', provider.get('models', [{}])[0].get('id', ''))
+    
+    def list_providers(self):
+        """列出所有可用的服务商"""
+        providers = self.get_providers()
+        return [(pid, pconfig.get('name', pid)) for pid, pconfig in providers.items()]
+
 class APIClientFactory:
     """API客户端工厂类"""
     
     @staticmethod
-    def create_client(provider, api_url, api_key, model, temperature=1.3):
-        """根据服务商类型创建对应的客户端"""
-        if provider.lower() == 'openai':
-            return OpenAIClient(api_url, api_key, model, temperature)
-        elif provider.lower() == 'siliconflow':
-            return SiliconFlowClient(api_url, api_key, model, temperature)
+    def create_client(provider_config):
+        """根据配置创建对应的客户端"""
+        client_type = provider_config.get('client_type', 'openai')
+        
+        if client_type == 'openai':
+            return OpenAIClient(provider_config)
+        elif client_type == 'siliconflow':
+            return SiliconFlowClient(provider_config)
         else:
-            raise ValueError(f"不支持的服务商: {provider}")
+            raise ValueError(f"不支持的客户端类型: {client_type}")
     
     @staticmethod
     def get_available_providers():
         """获取可用的服务商列表"""
-        return ['openai', 'siliconflow']
+        config = ProvidersConfig()
+        return [pid for pid, _ in config.list_providers()]
 
-def load_provider_config(provider_name):
-    """从环境变量加载指定服务商的配置"""
-    load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
-    
-    if provider_name.lower() == 'openai':
-        return {
-            'api_url': os.getenv("SFX_API_URL"),
-            'api_key': os.getenv("SFX_API_KEY"),
-            'model': os.getenv("SFX_MODEL"),
-            'temperature': float(os.getenv("SFX_TEMPERATURE", "1.3"))
-        }
-    elif provider_name.lower() == 'siliconflow':
-        return {
-            'api_url': os.getenv("SFX_FALLBACK_API_URL", "https://api.siliconflow.cn/v1/chat/completions"),
-            'api_key': os.getenv("SFX_FALLBACK_API_KEY"),
-            'model': os.getenv("SFX_FALLBACK_MODEL", "Qwen/Qwen2.5-7B-Instruct"),
-            'temperature': float(os.getenv("SFX_TEMPERATURE", "1.3"))
-        }
-    else:
-        raise ValueError(f"不支持的服务商: {provider_name}")
-
-def get_client_by_provider(provider_name):
-    """根据服务商名称获取配置好的客户端"""
-    config = load_provider_config(provider_name)
-    return APIClientFactory.create_client(
-        provider_name,
-        config['api_url'],
-        config['api_key'],
-        config['model'],
-        config['temperature']
-    )
+def get_client_by_provider(provider_id, model_id=None):
+    """根据服务商ID和模型ID获取配置好的客户端"""
+    config = ProvidersConfig()
+    provider_config = config.get_provider_config(provider_id, model_id)
+    return APIClientFactory.create_client(provider_config)

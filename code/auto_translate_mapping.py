@@ -2,26 +2,100 @@ import os
 import json
 import time
 import argparse
-import sys
 from dotenv import load_dotenv
 import importlib.util
 import tiktoken
-from api_clients import APIClientFactory, get_client_by_provider, load_provider_config
+from api_clients import APIClientFactory, get_client_by_provider, ProvidersConfig
 
 # 加载.env配置
 load_dotenv(os.path.join(os.path.dirname(__file__), '..', '.env'))
 
-# 配置区（全部从环境变量读取，提供默认值）
-SOURCE_LANG = os.getenv("SFX_SOURCE_LANG", "en")
-DEFAULT_TARGET_LANG = os.getenv("SFX_TARGET_LANG")
-DEFAULT_PROVIDER = os.getenv("SFX_DEFAULT_PROVIDER", "openai")
+# 配置管理器
+providers_config = ProvidersConfig()
 
 # 全局API客户端
-primary_client = None
-fallback_client = None
+selected_client = None
 
 # 文件路径
 MAPPING_PATH = os.path.join(os.path.dirname(__file__), "..", "json", "mapping.json")
+
+def select_provider():
+    """让用户选择服务商"""
+    providers = providers_config.list_providers()
+    default_provider = providers_config.get_default_provider()
+    
+    print("\n=== 可用的API服务商 ===")
+    for i, (provider_id, provider_name) in enumerate(providers, 1):
+        print(f"{i}. {provider_name} ({provider_id})")
+    
+    print(f"\n默认服务商: {default_provider}")
+    choice = input("请选择服务商 (直接回车使用默认): ").strip()
+    
+    if not choice:
+        return default_provider
+    
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(providers):
+            return providers[idx][0]  # 返回provider_id
+        else:
+            print("无效选择，使用默认服务商")
+            return default_provider
+    except ValueError:
+        print("无效输入，使用默认服务商")
+        return default_provider
+
+def select_model(provider_id):
+    """让用户选择模型"""
+    models = providers_config.get_provider_models(provider_id)
+    default_model = providers_config.get_default_model(provider_id)
+    
+    if not models:
+        print(f"服务商 {provider_id} 没有可用的模型")
+        return None
+    
+    print(f"\n=== 可用的模型 ({provider_id}) ===")
+    for i, model in enumerate(models, 1):
+        model_id = model.get('id')
+        model_name = model.get('name', model_id)
+        model_desc = model.get('description', '')
+        default_mark = " (默认)" if model_id == default_model else ""
+        print(f"{i}. {model_name}{default_mark}")
+        if model_desc:
+            print(f"   {model_desc}")
+    
+    print(f"\n默认模型: {default_model}")
+    choice = input("请选择模型 (直接回车使用默认): ").strip()
+    
+    if not choice:
+        return default_model
+    
+    try:
+        idx = int(choice) - 1
+        if 0 <= idx < len(models):
+            return models[idx]['id']
+        else:
+            print("无效选择，使用默认模型")
+            return default_model
+    except ValueError:
+        print("无效输入，使用默认模型")
+        return default_model
+
+def initialize_client(provider_id, model_id=None):
+    """初始化API客户端"""
+    global selected_client
+    
+    print(f"正在初始化服务商: {provider_id}")
+    if model_id:
+        print(f"使用模型: {model_id}")
+    
+    try:
+        selected_client = get_client_by_provider(provider_id, model_id)
+        print(f"✓ 服务商 {selected_client.get_name()} 初始化成功")
+        return True
+    except Exception as e:
+        print(f"✗ 服务商 {provider_id} 初始化失败: {e}")
+        return False
 
 def estimate_tokens(text, model="gpt-3.5-turbo"):
     """
@@ -40,7 +114,7 @@ def estimate_tokens(text, model="gpt-3.5-turbo"):
         encoding = tiktoken.get_encoding("cl100k_base")
         return len(encoding.encode(text))
 
-def calculate_batch_tokens(block, model=MODEL):
+def calculate_batch_tokens(block, model="gpt-3.5-turbo"):
     """
     计算一个批次的token消耗预算
     """
@@ -59,7 +133,8 @@ def calculate_batch_tokens(block, model=MODEL):
     
     # 计算输入token
     input_tokens = estimate_tokens(system_content, model) + estimate_tokens(user_content, model)
-      # 估算输出token（假设每个条目平均生成20个token）
+    
+    # 估算输出token（假设每个条目平均生成20个token）
     estimated_output_tokens = len(block) * 20
     
     return {
@@ -68,31 +143,7 @@ def calculate_batch_tokens(block, model=MODEL):
         "total_estimated_tokens": input_tokens + estimated_output_tokens
     }
 
-def call_fallback_api(messages, temperature=TEMPERATURE):
-    """
-    调用硅基流动API作为备用服务
-    """
-    headers = {
-        "Authorization": f"Bearer {FALLBACK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-    
-    data = {
-        "model": FALLBACK_MODEL,
-        "messages": messages,
-        "temperature": temperature
-    }
-    
-    response = requests.post(FALLBACK_API_URL, headers=headers, json=data)
-    response.raise_for_status()
-    result = response.json()
-    
-    if "choices" in result and len(result["choices"]) > 0:
-        return result["choices"][0]["message"]["content"]
-    else:
-        raise Exception(f"硅基流动API返回格式异常: {result}")
-
-def batch_translate_block(block, source=SOURCE_LANG, target=DEFAULT_TARGET_LANG, max_retries=3):
+def batch_translate_block(block, max_retries=3):
     """
     block: [(id, original), ...]
     返回 {id: translation, ...}
@@ -114,38 +165,16 @@ def batch_translate_block(block, source=SOURCE_LANG, target=DEFAULT_TARGET_LANG,
         {"role": "user", "content": user_content}
     ]
     
-    # 首先尝试主API
-    for attempt in range(max_retries):
+    # 使用选定的客户端
+    if selected_client:
         try:
-            print(f"  尝试主API (attempt {attempt + 1}/{max_retries})")
-            completion = client.chat.completions.create(
-                model=MODEL,
-                temperature=TEMPERATURE,
-                messages=messages,
-                response_format={"type": "json_object"}
-            )
-            
-            result_json = json.loads(completion.choices[0].message.content)
-            return result_json
+            print(f"  使用API: {selected_client.get_name()}")
+            result = selected_client.call_api(messages, max_retries)
+            return result
         except Exception as e:
-            print(f"  [警告] 主API失败: {e}")
-            if "404" in str(e) or attempt == max_retries - 1:
-                break
-            time.sleep(2 + attempt * 2)
+            print(f"  [错误] API调用失败: {e}")
     
-    # 主API失败，尝试备用API
-    print(f"  主API失败，尝试备用API (硅基流动)")
-    for attempt in range(max_retries):
-        try:
-            print(f"  尝试备用API (attempt {attempt + 1}/{max_retries})")
-            response_content = call_fallback_api(messages, TEMPERATURE)
-            result_json = json.loads(response_content)
-            return result_json
-        except Exception as e:
-            print(f"  [警告] 备用API失败: {e}")
-            time.sleep(2 + attempt * 2)
-    
-    print("[错误] 所有API都失败，跳过该块。内容：", block)
+    print("[错误] 没有可用的API客户端，跳过该块。内容：", block)
     return {}
 
 def get_grouped_blocks(mapping, min_group_size=2):
@@ -160,17 +189,33 @@ def get_grouped_blocks(mapping, min_group_size=2):
 
 def main():
     parser = argparse.ArgumentParser(description="自动批量翻译 mapping.json 中的 original 字段，分块保证风格统一")
-    parser.add_argument("--target", type=str, default=DEFAULT_TARGET_LANG, help="目标语言代码, 默认zh-CN")
     parser.add_argument("--min-group-size", type=int, default=2, help="分组最小条数，默认2")
     parser.add_argument("--dry-run", action="store_true", help="仅计算token预算，不执行翻译")
+    parser.add_argument("--provider", type=str, help="指定服务商，不指定则交互式选择")
+    parser.add_argument("--model", type=str, help="指定模型，不指定则交互式选择")
     args = parser.parse_args()
-    target_lang = args.target
+    
     min_group_size = args.min_group_size
     
-    if not API_KEY or API_KEY == "your-api-key-here":
-        print("请设置 API_KEY 环境变量或在代码中填写 API_KEY")
+    # 选择服务商
+    if args.provider:
+        provider_id = args.provider
+    else:
+        provider_id = select_provider()
+    
+    # 选择模型
+    if args.model:
+        model_id = args.model
+    else:
+        model_id = select_model(provider_id)
+    
+    # 初始化API客户端
+    if not initialize_client(provider_id, model_id):
+        print("API客户端初始化失败")
         sys.exit(1)
-        
+    
+    # ...existing code...
+    
     with open(MAPPING_PATH, "r", encoding="utf-8") as f:
         mapping = json.load(f)
     
@@ -185,9 +230,10 @@ def main():
     total_estimated_tokens = 0
     
     print("\n=== Token 预算计算 ===")
+    model = selected_client.model if selected_client else "gpt-3.5-turbo"
     for i, block in enumerate(groups, 1):
         prefix = block[0][1].split('_')[0] if block else ''
-        token_info = calculate_batch_tokens(block)
+        token_info = calculate_batch_tokens(block, model)
         total_input_tokens += token_info["input_tokens"]
         total_estimated_output_tokens += token_info["estimated_output_tokens"]
         total_estimated_tokens += token_info["total_estimated_tokens"]
@@ -219,7 +265,7 @@ def main():
         prefix = block[0][1].split('_')[0] if block else ''
         print(f"正在翻译分组: {prefix}，共{len(block)}条")
         
-        result = batch_translate_block(block, target=target_lang)
+        result = batch_translate_block(block)
         
         # 更新翻译结果到 mapping
         updated_count = 0
