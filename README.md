@@ -33,7 +33,7 @@ SFX File Translator/
 │   ├── rename_by_map.py           # 批量重命名文件
 │   ├── create_placeholders.py     # 创建占位文件
 │   ├── api_clients.py             # API客户端管理
-│   └── config_manager.py      # 配置管理工具
+│   └── config_manager.py          # 配置管理工具
 ├── config/                        # 配置文件
 │   ├── providers.json             # 服务商配置（包含API密钥）
 │   └── providers.json.example     # 服务商配置示例
