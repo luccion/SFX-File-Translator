@@ -177,6 +177,129 @@ def batch_translate_block(block, max_retries=3):
     print("[错误] 没有可用的API客户端，跳过该块。内容：", block)
     return {}
 
+def batch_translate_with_batch_api(groups):
+    """使用批量API进行翻译"""
+    if not selected_client or not selected_client.supports_batch():
+        print("当前客户端不支持批量API，使用常规翻译")
+        return False
+    
+    print(f"\n🚀 使用批量API进行翻译，共{len(groups)}组")
+    
+    # 准备批量请求数据
+    requests_data = []
+    group_mapping = {}  # 用于映射请求ID到分组
+    
+    for i, block in enumerate(groups):
+        items = [{"id": k, "text": v} for k, v in block]
+        user_content = (
+            "请将以下音效条目的text字段从英文翻译为中文，保持同类条目风格一致。\n"
+            "翻译为中文。保证翻译后的中文的每一个词汇用下划线分割，不使用空格。如遇某些无法翻译的词语或缩写，就保留\n"
+            "输出格式：JSON字典，key为id，value为翻译后的中文\n"
+            "示例输入：[{\"id\": \"123\", \"text\": \"WeaponSword_Wooden Hit_JSE\"}]\n"
+            "示例输出：{\"123\": \"武器_剑_木制_击打_JSE\"}\n\n"
+            "请翻译以下条目：\n" +
+            json.dumps(items, ensure_ascii=False)
+        )
+        
+        messages = [
+            {"role": "system", "content": "你是专业的音效术语翻译助手，请将英文音效术语翻译为中文。"},
+            {"role": "user", "content": user_content}
+        ]
+        
+        requests_data.append({
+            "messages": messages
+        })
+        group_mapping[f"request-{i}"] = block
+    
+    # 创建批量作业
+    batch_job = selected_client.create_batch_request(requests_data, "SFX Translation Batch")
+    if not batch_job:
+        print("❌ 批量作业创建失败")
+        return False
+    
+    print(f"✓ 批量作业已创建: {batch_job.id}")
+    print("⏳ 等待批量作业完成...")
+    
+    # 等待批量作业完成
+    while True:
+        batch_status = selected_client.get_batch_status(batch_job.id)
+        if not batch_status:
+            print("❌ 获取批量作业状态失败")
+            return False
+        
+        print(f"   状态: {batch_status.status}")
+        
+        if batch_status.status == "completed":
+            print("✅ 批量作业已完成")
+            break
+        elif batch_status.status == "failed":
+            print("❌ 批量作业失败")
+            return False
+        elif batch_status.status == "cancelled":
+            print("❌ 批量作业已取消")
+            return False
+        
+        time.sleep(30)  # 每30秒检查一次状态
+    
+    # 获取结果
+    results = selected_client.get_batch_results(batch_job.id)
+    if not results:
+        print("❌ 获取批量作业结果失败")
+        return False
+    
+    print(f"✓ 成功获取 {len(results)} 个翻译结果")
+    
+    # 处理结果
+    with open(MAPPING_PATH, "r", encoding="utf-8") as f:
+        mapping = json.load(f)
+    
+    total_updated = 0
+    for result in results:
+        try:
+            custom_id = result.get("custom_id")
+            if custom_id not in group_mapping:
+                print(f"⚠️  未找到对应的分组: {custom_id}")
+                continue
+            
+            response = result.get("response", {})
+            choices = response.get("choices", [])
+            if not choices:
+                print(f"⚠️  结果为空: {custom_id}")
+                continue
+            
+            content = choices[0].get("message", {}).get("content", "")
+            if not content:
+                print(f"⚠️  内容为空: {custom_id}")
+                continue
+            
+            # 解析翻译结果
+            translation_result = json.loads(content)
+            if "result" in translation_result:
+                translations = translation_result["result"]
+            else:
+                translations = translation_result
+            
+            # 更新映射
+            if isinstance(translations, dict):
+                for k, v in translations.items():
+                    if k in mapping:
+                        mapping[k]["translation"] = v
+                        total_updated += 1
+                        print(f"  更新翻译: {k} -> {v}")
+                    else:
+                        print(f"[警告] 条目 {k} 在mapping中不存在")
+            
+        except Exception as e:
+            print(f"❌ 处理结果失败: {e}")
+            continue
+    
+    # 保存结果
+    with open(MAPPING_PATH, "w", encoding="utf-8") as f:
+        json.dump(mapping, f, ensure_ascii=False, indent=2)
+    
+    print(f"✅ 批量翻译完成，共更新 {total_updated} 条翻译")
+    return True
+
 def get_grouped_blocks(mapping, min_group_size=2):
     """
     直接import group_mapping_blocks.py的分组函数，避免子进程和临时文件。
@@ -193,6 +316,7 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="仅计算token预算，不执行翻译")
     parser.add_argument("--provider", type=str, help="指定服务商，不指定则交互式选择")
     parser.add_argument("--model", type=str, help="指定模型，不指定则交互式选择")
+    parser.add_argument("--batch", action="store_true", help="使用批量API进行翻译（仅支持通义千问）")
     args = parser.parse_args()
     
     min_group_size = args.min_group_size
@@ -214,8 +338,6 @@ def main():
         print("API客户端初始化失败")
         sys.exit(1)
     
-    # ...existing code...
-    
     with open(MAPPING_PATH, "r", encoding="utf-8") as f:
         mapping = json.load(f)
     
@@ -223,6 +345,14 @@ def main():
     groups = get_grouped_blocks(mapping, min_group_size=min_group_size)
     total = sum(len(g) for g in groups)
     print(f"待翻译条目数: {total}, 分为 {len(groups)} 组")
+    
+    # 检查是否支持批量API
+    if args.batch:
+        if selected_client.supports_batch():
+            print("✓ 当前客户端支持批量API")
+        else:
+            print("❌ 当前客户端不支持批量API，将使用常规翻译")
+            args.batch = False
     
     # 计算token预算
     total_input_tokens = 0
@@ -247,58 +377,81 @@ def main():
     print(f"总输入token: {total_input_tokens}")
     print(f"总预计输出token: {total_estimated_output_tokens}")
     print(f"总预计token: {total_estimated_tokens}")
-    print(f"预估费用 (以1000token=0.001元计算): {total_estimated_tokens * 0.001 / 1000:.4f} 元")
+    
+    # 根据服务商调整费用计算
+    if "dashscope" in provider_id.lower():
+        # 通义千问定价（参考当前定价）
+        cost_per_1k_tokens = 0.002
+        print(f"预估费用 (通义千问，以1000token={cost_per_1k_tokens}元计算): {total_estimated_tokens * cost_per_1k_tokens / 1000:.4f} 元")
+    else:
+        # 其他服务商
+        cost_per_1k_tokens = 0.002
+        print(f"预估费用 (以1000token={cost_per_1k_tokens}元计算): {total_estimated_tokens * cost_per_1k_tokens / 1000:.4f} 元")
     
     if args.dry_run:
         print("\n--dry-run 模式，不执行翻译")
         return
     
     # 询问用户是否继续
+    if args.batch:
+        print("\n💡 将使用批量API进行翻译，可能需要等待较长时间")
+    
     confirm = input(f"\n是否继续执行翻译？(y/N): ").strip().lower()
     if confirm != 'y':
         print("已取消翻译")
         return
     
-    print("\n开始翻译...")
-    done = 0
-    for block in groups:
-        prefix = block[0][1].split('_')[0] if block else ''
-        print(f"正在翻译分组: {prefix}，共{len(block)}条")
-        
-        result = batch_translate_block(block)
-        
-        # 更新翻译结果到 mapping
-        updated_count = 0
-        if isinstance(result, dict):
-            # 检查是否有 "result" 键（AI可能返回 {"result": {...}} 格式）
-            if "result" in result:
-                translations = result["result"]
-            else:
-                translations = result
+    # 选择翻译方式
+    if args.batch and selected_client.supports_batch():
+        # 使用批量API
+        success = batch_translate_with_batch_api(groups)
+        if not success:
+            print("❌ 批量翻译失败，尝试使用常规翻译")
+            args.batch = False
+    
+    if not args.batch:
+        # 使用常规翻译
+        print("\n开始翻译...")
+        done = 0
+        for block in groups:
+            prefix = block[0][1].split('_')[0] if block else ''
+            print(f"正在翻译分组: {prefix}，共{len(block)}条")
             
-            # 检查translations是否为字典类型
-            if isinstance(translations, dict):
-                for k, v in translations.items():
-                    if k in mapping:
-                        mapping[k]["translation"] = v
-                        updated_count += 1
-                        print(f"  更新翻译: {k} -> {v}")
-                    else:
-                        print(f"[警告] 条目 {k} 在mapping中不存在")
+            result = batch_translate_block(block)
+            
+            # 更新翻译结果到 mapping
+            updated_count = 0
+            if isinstance(result, dict):
+                # 检查是否有 "result" 键（AI可能返回 {"result": {...}} 格式）
+                if "result" in result:
+                    translations = result["result"]
+                else:
+                    translations = result
+                
+                # 检查translations是否为字典类型
+                if isinstance(translations, dict):
+                    for k, v in translations.items():
+                        if k in mapping:
+                            mapping[k]["translation"] = v
+                            updated_count += 1
+                            print(f"  更新翻译: {k} -> {v}")
+                        else:
+                            print(f"[警告] 条目 {k} 在mapping中不存在")
+                else:
+                    print(f"[错误] 翻译结果不是字典类型: {type(translations)}, 内容: {translations}")
             else:
-                print(f"[错误] 翻译结果不是字典类型: {type(translations)}, 内容: {translations}")
-        else:
-            print(f"[错误] 翻译结果不是字典类型: {result}")
+                print(f"[错误] 翻译结果不是字典类型: {result}")
+            
+            print(f"  成功更新 {updated_count} 条翻译")
+            done += len(block)
+            
+            # 立即保存到文件
+            with open(MAPPING_PATH, "w", encoding="utf-8") as f:
+                json.dump(mapping, f, ensure_ascii=False, indent=2)
+            print(f"已完成: {done}/{total}")
+            time.sleep(2)  # 防止API限流
         
-        print(f"  成功更新 {updated_count} 条翻译")
-        done += len(block)
-        
-        # 立即保存到文件
-        with open(MAPPING_PATH, "w", encoding="utf-8") as f:
-            json.dump(mapping, f, ensure_ascii=False, indent=2)
-        print(f"已完成: {done}/{total}")
-        time.sleep(2)  # 防止API限流
-    print("全部批量翻译完成！")
+        print("全部批量翻译完成！")
 
 if __name__ == "__main__":
     main()

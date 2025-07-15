@@ -130,12 +130,21 @@ python auto_translate_mapping.py
 # 指定服务商和模型
 python auto_translate_mapping.py --provider siliconflow --model "Qwen/QwQ-32B"
 
+# 使用批量API进行翻译（仅支持通义千问）
+python auto_translate_mapping.py --provider dashscope --batch
+
 # 只查看token预算
 python auto_translate_mapping.py --dry-run
 
 # 自定义分组大小
 python auto_translate_mapping.py --min-group-size 5
 ```
+
+**批量API功能**：
+- 支持通义千问的批量API，可以显著降低翻译成本
+- 批量处理会将所有翻译请求一次性提交，然后等待结果
+- 适合大量文件的翻译，但需要等待较长时间（通常几分钟到几小时）
+- 使用 `--batch` 参数启用批量模式
 #### 步骤3: 校对
 
 手动调整`mapping.json`以达到最佳效果。

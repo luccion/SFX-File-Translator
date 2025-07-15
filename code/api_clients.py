@@ -52,6 +52,118 @@ class OpenAIClient(APIClient):
                 time.sleep(2 + attempt * 2)
         
         raise Exception("所有重试都失败")
+    
+    def create_batch_request(self, requests_data, batch_description="SFX Translation Batch"):
+        """创建批量请求（支持通义千问Batch API）"""
+        try:
+            # 检查是否支持批量API
+            if "dashscope" in self.api_url.lower():
+                return self._create_dashscope_batch(requests_data, batch_description)
+            else:
+                # 对于其他OpenAI兼容服务，使用常规批量处理
+                return self._create_openai_batch(requests_data, batch_description)
+        except Exception as e:
+            print(f"创建批量请求失败: {e}")
+            return None
+    
+    def _create_dashscope_batch(self, requests_data, batch_description):
+        """创建通义千问批量请求"""
+        try:
+            # 准备批量请求数据
+            batch_input = []
+            for i, request in enumerate(requests_data):
+                batch_input.append({
+                    "custom_id": f"request-{i}",
+                    "method": "POST",
+                    "url": "/v1/chat/completions",
+                    "body": {
+                        "model": self.model,
+                        "messages": request["messages"],
+                        "response_format": {"type": "json_object"},
+                        "temperature": self.config.get('temperature', 1.3)
+                    }
+                })
+            
+            # 创建批量作业
+            batch_job = self.client.batches.create(
+                input_file_id=self._upload_batch_file(batch_input),
+                endpoint="/v1/chat/completions",
+                completion_window="24h",
+                metadata={
+                    "description": batch_description,
+                    "created_by": "SFXRenamer"
+                }
+            )
+            
+            print(f"✓ 批量作业已创建: {batch_job.id}")
+            return batch_job
+            
+        except Exception as e:
+            print(f"创建通义千问批量请求失败: {e}")
+            return None
+    
+    def _create_openai_batch(self, requests_data, batch_description):
+        """创建OpenAI标准批量请求"""
+        try:
+            # 对于其他服务，可能需要不同的实现
+            # 这里先返回None，表示不支持批量
+            return None
+        except Exception as e:
+            print(f"创建OpenAI批量请求失败: {e}")
+            return None
+    
+    def _upload_batch_file(self, batch_input):
+        """上传批量请求文件"""
+        import tempfile
+        
+        # 创建临时文件
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.jsonl', delete=False) as f:
+            for item in batch_input:
+                f.write(json.dumps(item, ensure_ascii=False) + '\n')
+            temp_file_path = f.name
+        
+        try:
+            # 上传文件
+            with open(temp_file_path, 'rb') as f:
+                file_response = self.client.files.create(
+                    file=f,
+                    purpose="batch"
+                )
+            
+            return file_response.id
+        finally:
+            # 清理临时文件
+            os.unlink(temp_file_path)
+    
+    def get_batch_status(self, batch_id):
+        """获取批量作业状态"""
+        try:
+            return self.client.batches.retrieve(batch_id)
+        except Exception as e:
+            print(f"获取批量作业状态失败: {e}")
+            return None
+    
+    def get_batch_results(self, batch_id):
+        """获取批量作业结果"""
+        try:
+            batch = self.client.batches.retrieve(batch_id)
+            if batch.status == "completed" and batch.output_file_id:
+                # 下载结果文件
+                result_file = self.client.files.content(batch.output_file_id)
+                results = []
+                for line in result_file.text.strip().split('\n'):
+                    if line:
+                        results.append(json.loads(line))
+                return results
+            else:
+                return None
+        except Exception as e:
+            print(f"获取批量作业结果失败: {e}")
+            return None
+    
+    def supports_batch(self):
+        """检查是否支持批量API"""
+        return "dashscope" in self.api_url.lower()
 
 class SiliconFlowClient(APIClient):
     """硅基流动API客户端（使用HTTP请求）"""
