@@ -1,6 +1,6 @@
-# SFX-Renamer
+# SFX File Translator
 
-一个用于批量重命名音效文件的Python工具集，支持AI自动翻译和多服务商API配置。
+一个用于批量翻译重命名音效文件的Python工具集，支持AI自动翻译和多服务商API配置。
 
 效果取决于选择的模型，笔者使用Qwen3-30B-A3B测试，准确率约为90%，可能会有5%遗漏。遗漏部分只需再执行一遍就可以了。
 
@@ -25,7 +25,7 @@
 ## 项目结构
 
 ```
-SFX-Renamer/
+SFX File Translator/
 ├── code/                          # 核心脚本
 │   ├── generate_sfx_json.py       # 扫描音频文件并生成结构树
 │   ├── auto_translate_mapping.py  # AI翻译
