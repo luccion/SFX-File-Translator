@@ -1,38 +1,31 @@
-# SFXRenamer
+# SFX-Renamer
 
 一个用于批量重命名音效文件的Python工具集，支持AI自动翻译和多服务商API配置。
 
-效果取决于选择的模型，笔者使用Qwen/Qwen3-30B-A3B测试，准确率约为90%，可能会有一些遗漏（5%左右）。
-遗漏部分只需再执行一遍就可以了。
+效果取决于选择的模型，笔者使用Qwen3-30B-A3B测试，准确率约为90%，可能会有5%遗漏。遗漏部分只需再执行一遍就可以了。
 
-效果大概像这样：
+效果如下：
 
 ```json
- "889b92f1-223c-4d5c-ba22-9eefbc0d5372": {              //UUID
-    "original": "WEAPArmr_Hybrid Shield Drops_JSE_MW",  //原名
-    "translation": "武器_盔甲_混合_盾牌_掉落_JSE_MW"    //AI翻译
+ "5": { 
+    "original": "WEAPArmr_Hybrid Shield Drops_JSE_MW",
+    "translation": "武器_盔甲_混合_盾牌_掉落_JSE_MW" 
   },
 ```
 
 ## 功能特性
 
-- **引导式访问入口**: 通过main.py提供友好的菜单界面，无需手动执行各种脚本
-- **环境自动检查**: 自动检查依赖包和配置文件是否正确
 - **音频文件扫描**: 自动扫描目录结构并生成文件树
 - **AI自动翻译**: 支持多服务商API（通义千问、硅基流动等）
-- **二级选择界面**: 先选择服务商，再选择模型
-- **智能分组**: 按照命名规则智能分组，确保翻译风格一致
+- **智能分组**: 按照命名规则分组，使翻译风格基本一致
 - **批量重命名**: 基于翻译映射批量重命名文件
-- **占位文件**: 创建占位文件用于测试和预览
 - **配置管理**: 完整的配置管理工具
-- **完整流程**: 支持一键执行完整的重命名流程
 - **JSON Schema验证**: 提供完整的数据结构验证
 
 ## 项目结构
 
 ```
-SFXRenamer/
-├── main.py                        # 引导式访问入口
+SFX-Renamer/
 ├── code/                          # 核心脚本
 │   ├── generate_sfx_json.py       # 扫描音频文件并生成结构树
 │   ├── auto_translate_mapping.py  # AI翻译
@@ -40,7 +33,7 @@ SFXRenamer/
 │   ├── rename_by_map.py           # 批量重命名文件
 │   ├── create_placeholders.py     # 创建占位文件
 │   ├── api_clients.py             # API客户端管理
-│   └── config_manager_new.py      # 配置管理工具
+│   └── config_manager.py      # 配置管理工具
 ├── config/                        # 配置文件
 │   ├── providers.json             # 服务商配置（包含API密钥）
 │   └── providers.json.example     # 服务商配置示例
@@ -50,7 +43,7 @@ SFXRenamer/
 ├── schema/                        # JSON Schema定义
 │   ├── structure.schema.json      # 结构文件验证模式
 │   └── mapping.schema.json        # 映射文件验证模式
-├── .env                           # 环境变量配置
+├── .env                           # 环境变量配置（需要自己配置）
 ├── .env.example                   # 环境变量配置模板
 └── README.md                      # 项目说明文档
 ```
@@ -110,36 +103,6 @@ cp config/providers.json.example config/providers.json
 
 ### 3. 使用流程
 
-#### 推荐方式：使用引导式入口
-
-```bash
-python main.py
-```
-
-程序会自动进行环境检查，并提供友好的菜单界面：
-
-```
-==========================================================
-           SFXRenamer - 音效文件批量重命名工具
-==========================================================
-
-========================================
-          请选择要执行的操作:
-========================================
-1. 🔍 扫描音频文件 (生成文件结构)
-2. 🤖 AI自动翻译
-3. 📝 批量重命名文件
-4. 🧪 创建占位文件 (测试用)
-5. ⚙️  配置管理
-6. 🔄 完整流程 (扫描→翻译→重命名)
-0. 🚪 退出
-========================================
-```
-
-#### 手动执行方式
-
-如果您需要手动执行各个步骤，可以使用以下命令：
-
 ##### 步骤1: 扫描音频文件
 
 ```bash
@@ -173,8 +136,11 @@ python auto_translate_mapping.py --dry-run
 # 自定义分组大小
 python auto_translate_mapping.py --min-group-size 5
 ```
+#### 步骤3: 校对
 
-#### 步骤3: 批量重命名
+手动调整`mapping.json`以达到最佳效果。
+
+#### 步骤4: 批量重命名
 
 ```bash
 python rename_by_map.py
@@ -187,8 +153,7 @@ python rename_by_map.py
 ```bash
 python create_placeholders.py
 ```
-
-在 `SFX_PLACEHOLDER_DIR` 目录创建占位文件，用于测试重命名逻辑。
+如果你担心摧毁源文件，可以在 `SFX_PLACEHOLDER_DIR` 目录创建占位文件，用于测试重命名逻辑。
 
 ## 配置管理
 
@@ -229,42 +194,37 @@ python create_placeholders.py
 - `openai`: 兼容OpenAI接口的服务商（如通义千问）
 - `siliconflow`: 硅基流动专用客户端
 
+你可以手动添加其他的服务商和需要的模型。
+
 ### 配置管理工具
 
-使用 `config_manager_new.py` 管理配置：
+使用 `config_manager.py` 管理配置：
 
 ```bash
 # 列出所有服务商
-python config_manager_new.py list
+python config_manager.py list
 
 # 显示服务商配置
-python config_manager_new.py show siliconflow
+python config_manager.py show siliconflow
 
 # 列出某个服务商的所有模型
-python config_manager_new.py models siliconflow
+python config_manager.py models siliconflow
 
 # 设置默认服务商
-python config_manager_new.py default dashscope
+python config_manager.py default dashscope
 
 # 设置默认模型
-python config_manager_new.py set-model siliconflow "Qwen/QwQ-32B"
+python config_manager.py set-model siliconflow "Qwen/QwQ-32B"
 
 # 测试配置
-python config_manager_new.py test siliconflow --model "Qwen/QwQ-32B"
+python config_manager.py test siliconflow --model "Qwen/QwQ-32B"
 
-# 添加新服务商
-python config_manager_new.py add custom_provider "自定义服务商" "https://api.example.com/v1" "sk-xxx" "model-name"
+# 添加新服务商，还不如手动改config/providers.json
+python config_manager.py add custom_provider "自定义服务商" "https://api.example.com/v1" "sk-xxx" "model-name"
 
 # 删除服务商
-python config_manager_new.py remove custom_provider
+python config_manager.py remove custom_provider
 ```
-
-## 安全注意事项
-
-1. **永远不要提交包含真实API密钥的配置文件**
-2. 使用 `.gitignore` 排除敏感文件
-3. 定期轮换API密钥
-4. 监控API使用量和费用
 
 ## 详细功能说明
 
@@ -296,39 +256,6 @@ python config_manager_new.py remove custom_provider
 - 自动跳过已存在的目标文件
 - 详细的操作日志输出
 - 异常处理确保操作安全
-
-## 故障排除
-
-### 常见问题
-
-1. **配置文件不存在**
-   - 确保已正确复制示例文件
-   - 检查文件路径是否正确
-
-2. **API密钥无效**
-   - 检查密钥是否正确填写
-   - 确认API密钥是否已过期
-
-3. **模型不可用**
-   - 确认模型ID是否正确
-   - 检查服务商是否支持该模型
-
-4. **网络连接问题**
-   - 检查网络连接
-   - 确认API地址是否正确
-
-### 调试步骤
-
-1. **测试配置**：
-   ```bash
-   python config_manager_new.py test siliconflow
-   ```
-
-2. **检查日志**：
-   查看控制台输出中的错误信息
-
-3. **验证文件**：
-   确认配置文件格式正确
 
 ## 贡献指南
 
