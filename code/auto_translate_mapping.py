@@ -366,13 +366,7 @@ def main():
         token_info = calculate_batch_tokens(block, model)
         total_input_tokens += token_info["input_tokens"]
         total_estimated_output_tokens += token_info["estimated_output_tokens"]
-        total_estimated_tokens += token_info["total_estimated_tokens"]
-        
-        print(f"分组 {i}: {prefix} ({len(block)}条)")
-        print(f"  输入token: {token_info['input_tokens']}")
-        print(f"  预计输出token: {token_info['estimated_output_tokens']}")
-        print(f"  总计token: {token_info['total_estimated_tokens']}")
-    
+        total_estimated_tokens += token_info["total_estimated_tokens"]    
     print(f"\n=== 总计 ===")
     print(f"总输入token: {total_input_tokens}")
     print(f"总预计输出token: {total_estimated_output_tokens}")
@@ -381,7 +375,7 @@ def main():
     # 根据服务商调整费用计算
     if "dashscope" in provider_id.lower():
         # 通义千问定价（参考当前定价）
-        cost_per_1k_tokens = 0.002
+        cost_per_1k_tokens = 0.004
         print(f"预估费用 (通义千问，以1000token={cost_per_1k_tokens}元计算): {total_estimated_tokens * cost_per_1k_tokens / 1000:.4f} 元")
     else:
         # 其他服务商
@@ -449,7 +443,7 @@ def main():
             with open(MAPPING_PATH, "w", encoding="utf-8") as f:
                 json.dump(mapping, f, ensure_ascii=False, indent=2)
             print(f"已完成: {done}/{total}")
-            time.sleep(2)  # 防止API限流
+            time.sleep(60/15000)  # 防止API限流
         
         print("全部批量翻译完成！")
 
