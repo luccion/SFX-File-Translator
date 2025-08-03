@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 服务商配置管理工具
 用于管理 providers.json 中的服务商配置

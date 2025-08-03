@@ -28,6 +28,8 @@ def select_provider():
     for i, (provider_id, provider_name) in enumerate(providers, 1):
         print(f"{i}. {provider_name} ({provider_id})")
     
+    
+    
     print(f"\n默认服务商: {default_provider}")
     choice = input("请选择服务商 (直接回车使用默认): ").strip()
     
@@ -336,7 +338,6 @@ def main():
     # 初始化API客户端
     if not initialize_client(provider_id, model_id):
         print("API客户端初始化失败")
-        sys.exit(1)
     
     with open(MAPPING_PATH, "r", encoding="utf-8") as f:
         mapping = json.load(f)
@@ -406,10 +407,17 @@ def main():
     if not args.batch:
         # 使用常规翻译
         print("\n开始翻译...")
+        
+        # 时间统计变量
+        start_time = time.time()
+        loop_times = []
         done = 0
-        for block in groups:
+        1
+        for i, block in enumerate(groups, 1):
+            loop_start_time = time.time()
+            
             prefix = block[0][1].split('_')[0] if block else ''
-            print(f"正在翻译分组: {prefix}，共{len(block)}条")
+            print(f"正在翻译分组 {i}/{len(groups)}: {prefix}，共{len(block)}条")
             
             result = batch_translate_block(block)
             
@@ -439,13 +447,47 @@ def main():
             print(f"  成功更新 {updated_count} 条翻译")
             done += len(block)
             
+            # 计算时间统计
+            loop_end_time = time.time()
+            loop_duration = loop_end_time - loop_start_time
+            loop_times.append(loop_duration)
+            
+            # 计算平均时间和预计时间
+            avg_time_per_loop = sum(loop_times) / len(loop_times)
+            elapsed_time = time.time() - start_time
+            remaining_loops = len(groups) - i
+            estimated_remaining_time = remaining_loops * avg_time_per_loop
+            estimated_total_time = elapsed_time + estimated_remaining_time
+            progress_percent = (i / len(groups)) * 100
+            
+            # 格式化时间显示
+            def format_time(seconds):
+                hours = int(seconds // 3600)
+                minutes = int((seconds % 3600) // 60)
+                secs = int(seconds % 60)
+                if hours > 0:
+                    return f"{hours}h {minutes}m {secs}s"
+                elif minutes > 0:
+                    return f"{minutes}m {secs}s"
+                else:
+                    return f"{secs}s"
+            
+            print(f"  本次耗时: {format_time(loop_duration)}")
+            print(f"  平均耗时: {format_time(avg_time_per_loop)}")
+            print(f"  已用时间: {format_time(elapsed_time)}")
+            print(f"  预计总时间: {format_time(estimated_total_time)}")
+            print(f"  预计剩余: {format_time(estimated_remaining_time)}")
+            print(f"  进度: {progress_percent:.1f}% ({done}/{total}条)")
+            
             # 立即保存到文件
             with open(MAPPING_PATH, "w", encoding="utf-8") as f:
                 json.dump(mapping, f, ensure_ascii=False, indent=2)
             print(f"已完成: {done}/{total}")
             time.sleep(60/15000)  # 防止API限流
+            print("  ✓ 已保存进度")
         
-        print("全部批量翻译完成！")
+        total_time = time.time() - start_time
+        print(f"\n🎉 全部批量翻译完成！总耗时: {format_time(total_time)}")
 
 if __name__ == "__main__":
     main()
